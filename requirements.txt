@@ -1,4 +1,17 @@
+# Core
 anthropic>=0.40.0
 pynput>=1.7.6
 python-dotenv>=1.0.0
 tomli_w>=1.0.0
+
+# Tray (macOS)
+# rumps>=0.4.0
+
+# Tray (Linux)
+# pystray>=0.19.0
+# Pillow>=10.0.0
+
+# Dictation (optional)
+# openai-whisper>=20231117
+# sounddevice>=0.4.6
+# soundfile>=0.12.0

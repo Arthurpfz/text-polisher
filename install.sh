@@ -64,6 +64,16 @@ elif [ "$PLATFORM" = "linux" ]; then
     pip install --quiet "$SCRIPT_DIR[tray-linux]" 2>/dev/null || true
 fi
 
+# Install dictation dependencies
+read -p "Install voice dictation (Whisper)? This downloads ~140MB model. [y/N] " install_dictation
+if [ "$install_dictation" = "y" ] || [ "$install_dictation" = "Y" ]; then
+    echo "Installing dictation dependencies..."
+    pip install --quiet "$SCRIPT_DIR[dictation]"
+    echo "Pre-downloading Whisper 'base' model..."
+    "$VENV_PYTHON" -c "import whisper; whisper.load_model('base')" 2>/dev/null || true
+    echo "Dictation ready."
+fi
+
 # Create .env if not exists
 if [ ! -f "$INSTALL_DIR/.env" ]; then
     if [ -f "$SCRIPT_DIR/.env" ]; then

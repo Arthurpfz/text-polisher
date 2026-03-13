@@ -14,8 +14,6 @@ from text_polisher.polisher import Polisher
 
 logger = logging.getLogger("text_polisher")
 
-_tray = None
-
 
 def _setup_logging():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -27,7 +25,16 @@ def _setup_logging():
     root.setLevel(logging.INFO)
 
 
-def _worker(event_queue: queue.Queue, polisher: Polisher, config: Config):
+class _AppState:
+    """Mutable state shared between threads."""
+    def __init__(self):
+        self.recorder = None
+        self.transcriber = None
+        self.indicator = None
+        self.tray = None
+
+
+def _worker(event_queue: queue.Queue, polisher: Polisher, config: Config, state: _AppState):
     """Worker thread: consumes hotkey events, does clipboard + API work."""
     while True:
         event: HotkeyEvent = event_queue.get()
@@ -44,13 +51,39 @@ def _worker(event_queue: queue.Queue, polisher: Polisher, config: Config):
             except Exception:
                 logger.exception("Error during polish")
         elif event.type == "dictate_start":
-            logger.info("Dictation event received (V3 feature)")
+            if state.recorder:
+                try:
+                    if state.indicator:
+                        state.indicator.show()
+                    state.recorder.start()
+                except Exception:
+                    logger.exception("Error starting dictation")
+                    if state.indicator:
+                        state.indicator.hide()
         elif event.type == "dictate_stop":
-            logger.info("Dictation stop event received (V3 feature)")
+            if state.recorder and state.transcriber:
+                try:
+                    audio = state.recorder.stop()
+                    if state.indicator:
+                        state.indicator.hide()
+                    if len(audio) < state.recorder.samplerate * 0.3:
+                        logger.info("Recording too short, skipping")
+                        continue
+                    text = state.transcriber.transcribe(audio)
+                    if not text.strip():
+                        logger.info("Transcription empty, skipping")
+                        continue
+                    logger.info("Dictation transcribed, polishing")
+                    result = polisher.polish(text, config.language, config.tone)
+                    paste_text(result)
+                    logger.info("Dictation polish complete")
+                except Exception:
+                    logger.exception("Error during dictation")
+                    if state.indicator:
+                        state.indicator.hide()
 
 
 def run():
-    global _tray
     load_dotenv()
     _setup_logging()
     logger.info("Text Polisher starting")
@@ -64,9 +97,21 @@ def run():
         sys.exit(1)
 
     event_queue: queue.Queue[HotkeyEvent] = queue.Queue()
+    state = _AppState()
+
+    # Initialize dictation components (V3)
+    try:
+        from text_polisher.dictation.recorder import Recorder
+        from text_polisher.dictation.transcriber import Transcriber
+        state.recorder = Recorder()
+        state.transcriber = Transcriber(config.whisper_model)
+        logger.info("Dictation available (Whisper model: %s)", config.whisper_model)
+        print(f"Dictation available. Hold {config.dictate_hotkey} to dictate.")
+    except ImportError:
+        logger.info("Dictation dependencies not installed, skipping")
 
     worker_thread = threading.Thread(
-        target=_worker, args=(event_queue, polisher, config), daemon=True
+        target=_worker, args=(event_queue, polisher, config, state), daemon=True,
     )
     worker_thread.start()
 
@@ -94,16 +139,20 @@ def run():
     # Try to start tray (V2+)
     try:
         from text_polisher.tray import create_tray
-        _tray = create_tray(config, on_language_change, on_tone_change, on_quit)
+        state.tray = create_tray(config, on_language_change, on_tone_change, on_quit)
     except ImportError:
-        _tray = None
+        state.tray = None
 
-    if _tray:
+    # Wire recording indicator to tray
+    if state.recorder:
+        from text_polisher.dictation.indicator import RecordingIndicator
+        state.indicator = RecordingIndicator(state.tray)
+
+    if state.tray:
         logger.info("Tray icon started")
         print("Tray icon active. Use it to change language/tone.")
-        _tray.run()  # blocks main thread
+        state.tray.run()  # blocks main thread
     else:
-        # Fallback: no tray, just wait
         print("Press Ctrl+C to quit.")
         stop_event = threading.Event()
         signal.signal(signal.SIGINT, lambda *_: stop_event.set())
