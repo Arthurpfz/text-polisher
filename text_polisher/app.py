@@ -14,6 +14,8 @@ from text_polisher.polisher import Polisher
 
 logger = logging.getLogger("text_polisher")
 
+_tray = None
+
 
 def _setup_logging():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -48,6 +50,7 @@ def _worker(event_queue: queue.Queue, polisher: Polisher, config: Config):
 
 
 def run():
+    global _tray
     load_dotenv()
     _setup_logging()
     logger.info("Text Polisher starting")
@@ -72,15 +75,42 @@ def run():
 
     logger.info("Listening for hotkeys (polish: %s)", config.polish_hotkey)
     print(f"Text Polisher running. Press {config.polish_hotkey} to polish selected text.")
-    print("Press Ctrl+C to quit.")
 
-    stop_event = threading.Event()
-    signal.signal(signal.SIGINT, lambda *_: stop_event.set())
-    signal.signal(signal.SIGTERM, lambda *_: stop_event.set())
+    def on_language_change(lang):
+        config.language = lang
+        config.save()
+        logger.info("Language changed to %s", lang)
 
-    try:
-        stop_event.wait()
-    finally:
+    def on_tone_change(tone):
+        config.tone = tone
+        config.save()
+        logger.info("Tone changed to %s", tone)
+
+    def on_quit():
         hotkey_mgr.stop()
-        logger.info("Text Polisher stopped")
-        print("\nText Polisher stopped.")
+        logger.info("Text Polisher stopped via tray")
+        os._exit(0)
+
+    # Try to start tray (V2+)
+    try:
+        from text_polisher.tray import create_tray
+        _tray = create_tray(config, on_language_change, on_tone_change, on_quit)
+    except ImportError:
+        _tray = None
+
+    if _tray:
+        logger.info("Tray icon started")
+        print("Tray icon active. Use it to change language/tone.")
+        _tray.run()  # blocks main thread
+    else:
+        # Fallback: no tray, just wait
+        print("Press Ctrl+C to quit.")
+        stop_event = threading.Event()
+        signal.signal(signal.SIGINT, lambda *_: stop_event.set())
+        signal.signal(signal.SIGTERM, lambda *_: stop_event.set())
+        try:
+            stop_event.wait()
+        finally:
+            hotkey_mgr.stop()
+            logger.info("Text Polisher stopped")
+            print("\nText Polisher stopped.")
