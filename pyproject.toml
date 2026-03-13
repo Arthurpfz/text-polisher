@@ -17,3 +17,6 @@ dictation = ["openai-whisper>=20231117", "sounddevice>=0.4.6", "soundfile>=0.12.
 
 [project.scripts]
 text-polisher = "text_polisher.__main__:main"
+
+[tool.setuptools.package-data]
+text_polisher = ["assets/*.png"]

@@ -84,7 +84,8 @@ def _worker(event_queue: queue.Queue, polisher: Polisher, config: Config, state:
 
 
 def run():
-    load_dotenv()
+    load_dotenv(CONFIG_DIR / ".env")
+    load_dotenv()  # also check cwd
     _setup_logging()
     logger.info("Text Polisher starting")
 
